@@ -1,0 +1,46 @@
+<report id="sample-report">
+  <task><name>Sample OpenVAS Scan</name></task>
+  <scan_start>2026-05-22T10:00:00Z</scan_start>
+  <scan_end>2026-05-22T10:30:00Z</scan_end>
+  <timezone>America/Bogota</timezone>
+  <results>
+    <result id="result-1">
+      <name>SSL/TLS: Certificate Expired</name>
+      <host>172.18.100.26<detail><name>hostname</name><value>at-nsx-01.at.interno</value></detail></host>
+      <port>443/tcp</port>
+      <threat>Medium</threat>
+      <severity>5.0</severity>
+      <qod><value>99</value></qod>
+      <description>Certificate expired.</description>
+      <solution>Replace the expired TLS certificate.</solution>
+      <nvt>
+        <name>SSL/TLS: Certificate Expired</name>
+        <cvss_base>5.0</cvss_base>
+        <solution_type>Mitigation</solution_type>
+        <tags>summary=The TLS certificate is expired.|impact=Clients may reject the service.|solution=Renew the certificate.</tags>
+        <refs>
+          <ref type="CVE" id="CVE-2024-0001"/>
+          <ref type="URL" id="https://example.invalid"/>
+        </refs>
+      </nvt>
+    </result>
+    <result id="result-2">
+      <name>SSL/TLS: Renegotiation MITM Vulnerability</name>
+      <host>172.18.100.71<detail><name>hostname</name><value>at-logs.at.interno</value></detail></host>
+      <port>443/tcp</port>
+      <threat>Medium</threat>
+      <severity>5.8</severity>
+      <qod><value>70</value></qod>
+      <solution>Disable insecure renegotiation.</solution>
+      <nvt>
+        <name>SSL/TLS: Renegotiation MITM Vulnerability</name>
+        <cvss_base>5.8</cvss_base>
+        <solution_type>VendorFix</solution_type>
+        <tags>summary=The service supports insecure TLS renegotiation.|impact=Traffic manipulation may be possible.|solution=Update TLS configuration.</tags>
+        <refs>
+          <ref type="CVE" id="CVE-2009-3555"/>
+        </refs>
+      </nvt>
+    </result>
+  </results>
+</report>
