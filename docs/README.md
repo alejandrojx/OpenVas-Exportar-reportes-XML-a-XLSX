@@ -1,11 +1,11 @@
-# Exportador OpenVAS / Greenbone a XLSX
+# OpenVas - Exportar reportes XML a XLSX
 
 Esta carpeta contiene una herramienta para generar reportes `.xlsx` personalizados sin modificar Greenbone OS.
 
 La idea es:
 
 1. Descargar el reporte completo en XML desde Greenbone/OpenVAS.
-2. Convertir ese XML a un Excel con hojas de resumen, vulnerabilidades, hosts, CVEs y remediación.
+2. Convertir ese XML a un Excel con hojas de resumen, vulnerabilidades, hosts, CVEs y remediacion.
 3. Mantener Greenbone intacto para no romper actualizaciones ni firmas de report formats.
 
 ## Opcion A: usar un XML ya exportado
