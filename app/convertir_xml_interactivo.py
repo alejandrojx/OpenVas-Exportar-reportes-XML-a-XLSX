@@ -20,15 +20,48 @@ INPUT_DIR = PROJECT_DIR / "entradas"
 OUTPUT_DIR = PROJECT_DIR / "salidas"
 
 
-def ask(prompt: str, default: str = "", required: bool = True) -> str:
+def prompt_header(title: str, subtitle: str = "") -> None:
+    print("")
+    print("=" * 79)
+    print(title)
+    print("-" * 79)
+    if subtitle:
+        print(subtitle)
+        print("")
+
+
+def ask_value(title: str, default: str = "", note: str = "", required: bool = True) -> str:
+    prompt_header(title)
+    if default:
+        print(f"Default: {default}")
+    if note:
+        print(f"Note: {note}")
+    print("")
     while True:
-        label = f"{prompt} [{default}]: " if default else f"{prompt}: "
-        value = input(label).strip().strip('"')
+        value = input("ENTER VALUE, OR PRESS <ENTER> TO ACCEPT THE DEFAULT:: ").strip().strip('"')
         if not value and default:
             value = default
         if value or not required:
             return value
-        print("Este dato es obligatorio.")
+        print("A value is required.")
+
+
+def ask_menu(title: str, options: list[str], default_index: int = 1, subtitle: str = "") -> int | None:
+    if not options:
+        return None
+    while True:
+        prompt_header(title, subtitle)
+        for index, option in enumerate(options, start=1):
+            marker = "->" if index == default_index else "  "
+            print(f"  {marker}{index}- {option}")
+        print("")
+        value = input("ENTER THE NUMBER FOR YOUR CHOICE, OR PRESS <ENTER> TO ACCEPT THE DEFAULT:: ").strip()
+        if not value:
+            return default_index
+        if value.isdigit() and 1 <= int(value) <= len(options):
+            return int(value)
+        print("")
+        print("Invalid selection. Try again.")
 
 
 def list_xml_files(folder: Path) -> list[Path]:
@@ -40,20 +73,14 @@ def list_xml_files(folder: Path) -> list[Path]:
 def choose_from_list(files: list[Path], title: str) -> Path | None:
     if not files:
         return None
-    print("")
-    print(title)
-    print("-" * 90)
-    for index, file in enumerate(files, start=1):
+    options = []
+    for file in files:
         size_kb = file.stat().st_size / 1024
-        print(f"{index:>2}. {file.name:<55} {size_kb:>10.1f} KB")
-    print("-" * 90)
-    while True:
-        value = ask("Numero del XML o Enter para cancelar", "", required=False)
-        if not value:
-            return None
-        if value.isdigit() and 1 <= int(value) <= len(files):
-            return files[int(value) - 1]
-        print("Seleccion no valida.")
+        options.append(f"{file.name} ({size_kb:.1f} KB)")
+    selected = ask_menu(title, options, default_index=1, subtitle=str(INPUT_DIR))
+    if selected is None:
+        return None
+    return files[selected - 1]
 
 
 def choose_xml() -> Path:
@@ -61,12 +88,15 @@ def choose_xml() -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     while True:
-        print("")
-        print("Selecciona el reporte XML que esta en la carpeta entradas")
-        selected = choose_from_list(list_xml_files(INPUT_DIR), f"XML en {INPUT_DIR}")
+        selected = choose_from_list(
+            list_xml_files(INPUT_DIR),
+            "Select the OpenVAS XML report to convert",
+        )
         if selected:
             return selected
-        print("No se selecciono XML. Copia primero el reporte .xml a la carpeta entradas.")
+        prompt_header("No XML reports found")
+        print(f"Copy the exported .xml report to: {INPUT_DIR}")
+        input("Press <ENTER> to try again...")
 
 
 def default_output_name(xml_path: Path) -> str:
@@ -74,28 +104,32 @@ def default_output_name(xml_path: Path) -> str:
 
 
 def main() -> int:
-    print("")
-    print("Convertidor OpenVAS / Greenbone XML a XLSX")
-    print("=" * 55)
-    print("Exporta primero desde Greenbone como XML o Anonymous XML.")
-    print("")
+    prompt_header(
+        "OpenVAS / Greenbone XML to XLSX Converter",
+        "Export the report from Greenbone Web as XML or Anonymous XML before running this tool.",
+    )
 
     if not EXPORTER.exists():
         print(f"No encuentro el convertidor base: {EXPORTER}")
         return 1
 
     xml_path = choose_xml()
-    output_name = ask("Nombre del XLSX de salida (no necesitas escribir .xlsx)", default_output_name(xml_path))
+    output_name = ask_value(
+        "Enter the XLSX output name",
+        default_output_name(xml_path),
+        "You do not need to type the .xlsx extension.",
+    )
     output_path = Path(output_name)
     if output_path.suffix.lower() != ".xlsx":
         output_path = output_path.with_suffix(".xlsx")
     if not output_path.is_absolute():
         output_path = OUTPUT_DIR / output_path.name
 
-    print("")
-    print(f"XML:  {xml_path}")
+    prompt_header("Converting report")
+    print(f"XML : {xml_path}")
     print(f"XLSX: {output_path}")
     print("")
+    sys.stdout.flush()
 
     completed = subprocess.run(
         [
@@ -113,8 +147,8 @@ def main() -> int:
         print("La conversion fallo. Verifica que el XML sea un reporte Greenbone/OpenVAS completo.")
         return completed.returncode
 
-    print("")
-    print(f"Listo: {output_path}")
+    prompt_header("Conversion completed")
+    print(f"Output: {output_path}")
     return 0
 
 
