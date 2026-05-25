@@ -33,17 +33,17 @@ def prompt_header(title: str, subtitle: str = "") -> None:
 def ask_value(title: str, default: str = "", note: str = "", required: bool = True) -> str:
     prompt_header(title)
     if default:
-        print(f"Default: {default}")
+        print(f"Predeterminado: {default}")
     if note:
-        print(f"Note: {note}")
+        print(f"Nota: {note}")
     print("")
     while True:
-        value = input("ENTER VALUE, OR PRESS <ENTER> TO ACCEPT THE DEFAULT:: ").strip().strip('"')
+        value = input("INGRESE EL VALOR, O PRESIONE <ENTER> PARA ACEPTAR EL PREDETERMINADO:: ").strip().strip('"')
         if not value and default:
             value = default
         if value or not required:
             return value
-        print("A value is required.")
+        print("El valor es obligatorio.")
 
 
 def ask_menu(title: str, options: list[str], default_index: int = 1, subtitle: str = "") -> int | None:
@@ -55,13 +55,13 @@ def ask_menu(title: str, options: list[str], default_index: int = 1, subtitle: s
             marker = "->" if index == default_index else "  "
             print(f"  {marker}{index}- {option}")
         print("")
-        value = input("ENTER THE NUMBER FOR YOUR CHOICE, OR PRESS <ENTER> TO ACCEPT THE DEFAULT:: ").strip()
+        value = input("INGRESE EL NUMERO DE SU OPCION, O PRESIONE <ENTER> PARA ACEPTAR EL PREDETERMINADO:: ").strip()
         if not value:
             return default_index
         if value.isdigit() and 1 <= int(value) <= len(options):
             return int(value)
         print("")
-        print("Invalid selection. Try again.")
+        print("Seleccion no valida. Intente nuevamente.")
 
 
 def list_xml_files(folder: Path) -> list[Path]:
@@ -90,13 +90,13 @@ def choose_xml() -> Path:
     while True:
         selected = choose_from_list(
             list_xml_files(INPUT_DIR),
-            "Select the OpenVAS XML report to convert",
+            "Seleccione el reporte XML de OpenVAS a convertir",
         )
         if selected:
             return selected
-        prompt_header("No XML reports found")
-        print(f"Copy the exported .xml report to: {INPUT_DIR}")
-        input("Press <ENTER> to try again...")
+        prompt_header("No se encontraron reportes XML")
+        print(f"Copie el reporte .xml exportado en: {INPUT_DIR}")
+        input("Presione <ENTER> para intentar nuevamente...")
 
 
 def default_output_name(xml_path: Path) -> str:
@@ -105,8 +105,8 @@ def default_output_name(xml_path: Path) -> str:
 
 def main() -> int:
     prompt_header(
-        "OpenVAS / Greenbone XML to XLSX Converter",
-        "Export the report from Greenbone Web as XML or Anonymous XML before running this tool.",
+        "Convertidor OpenVAS / Greenbone de XML a XLSX",
+        "Exporte primero el reporte desde Greenbone Web como XML o Anonymous XML.",
     )
 
     if not EXPORTER.exists():
@@ -115,9 +115,9 @@ def main() -> int:
 
     xml_path = choose_xml()
     output_name = ask_value(
-        "Enter the XLSX output name",
+        "Ingrese el nombre del XLSX de salida",
         default_output_name(xml_path),
-        "You do not need to type the .xlsx extension.",
+        "No necesita escribir la extension .xlsx.",
     )
     output_path = Path(output_name)
     if output_path.suffix.lower() != ".xlsx":
@@ -125,7 +125,7 @@ def main() -> int:
     if not output_path.is_absolute():
         output_path = OUTPUT_DIR / output_path.name
 
-    prompt_header("Converting report")
+    prompt_header("Convirtiendo reporte")
     print(f"XML : {xml_path}")
     print(f"XLSX: {output_path}")
     print("")
@@ -144,11 +144,11 @@ def main() -> int:
     )
     if completed.returncode != 0:
         print("")
-        print("La conversion fallo. Verifica que el XML sea un reporte Greenbone/OpenVAS completo.")
+        print("La conversion fallo. Verifique que el XML sea un reporte Greenbone/OpenVAS completo.")
         return completed.returncode
 
-    prompt_header("Conversion completed")
-    print(f"Output: {output_path}")
+    prompt_header("Conversion completada")
+    print(f"Salida: {output_path}")
     return 0
 
 
