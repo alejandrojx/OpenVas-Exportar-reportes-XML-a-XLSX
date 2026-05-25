@@ -238,20 +238,16 @@ def download_report_with_gvm_cli(args: argparse.Namespace) -> Path:
         f'format_id="{XML_REPORT_FORMAT_ID}" details="1" ignore_pagination="1" '
         f'filter="{html.escape(filter_arg, quote=True)}"/>'
     )
-    command = [
-        args.gvm_cli,
-        "--gmp-username",
-        args.username,
-        "--gmp-password",
-        args.password,
-        "tls",
-        "--hostname",
-        args.gmp_host,
-        "--port",
-        str(args.gmp_port),
-        "--xml",
-        request,
-    ]
+    command = [args.gvm_cli, "--gmp-username", args.username, "--gmp-password", args.password]
+    if args.connection == "ssh":
+        command.extend(["ssh", "--hostname", args.gmp_host, "--port", str(args.ssh_port), "-A"])
+        if args.ssh_username:
+            command.extend(["--ssh-username", args.ssh_username])
+        if args.ssh_password:
+            command.extend(["--ssh-password", args.ssh_password])
+    else:
+        command.extend(["tls", "--hostname", args.gmp_host, "--port", str(args.gmp_port)])
+    command.extend(["--xml", request])
     completed = subprocess.run(command, check=False, capture_output=True, text=False)
     if completed.returncode != 0:
         stdout = completed.stdout.decode("utf-8", errors="replace").strip()
@@ -268,7 +264,8 @@ def download_report_with_gvm_cli(args: argparse.Namespace) -> Path:
             print(stderr, file=sys.stderr)
         print("", file=sys.stderr)
         print("Pistas:", file=sys.stderr)
-        print("- Verifica que el puerto GMP sea el correcto. En Greenbone suele ser 9390, no 443.", file=sys.stderr)
+        print("- En appliances GOS actuales, usa connection=ssh. TLS/9390 puede no estar soportado.", file=sys.stderr)
+        print("- Si usas TLS, verifica que el puerto GMP sea el correcto. En instalaciones antiguas suele ser 9390.", file=sys.stderr)
         print("- Verifica usuario, password y que el UUID sea el ID del reporte, no de la tarea.", file=sys.stderr)
         print("- Si usas appliance GOS, confirma que GMP/API este permitido desde tu equipo.", file=sys.stderr)
         raise SystemExit(completed.returncode)
@@ -306,7 +303,6 @@ def style_sheet(ws) -> None:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
 
 
 def set_widths(ws, widths: dict[str, int]) -> None:
@@ -325,6 +321,34 @@ def severity_fill(level: str) -> PatternFill:
         "False Positive": "D9EAD3",
     }
     return PatternFill("solid", fgColor=colors.get(level, "BFBFBF"))
+
+
+def add_index_sheet(wb: Workbook, data: ReportData) -> None:
+    index = wb.create_sheet("Indice", 0)
+    index.append(["Hoja", "Contenido"])
+    rows = [
+        ("Resumen", "Resumen ejecutivo, totales y grafico por severidad."),
+        ("Vulnerabilidades", "Todos los hallazgos tecnicos exportados desde OpenVAS."),
+        ("Por_Host", "Hallazgos ordenados por activo para remediacion."),
+        ("Hosts", "Conteo consolidado por host afectado."),
+        ("Vuln_Detalle", "Vulnerabilidades deduplicadas con hosts, impacto y solucion."),
+        ("CVEs", "Agrupacion por CVE."),
+        ("Remediacion", "Lista priorizada de remediacion."),
+    ]
+    for sheet, description in rows:
+        index.append([sheet, description])
+        cell = index.cell(index.max_row, 1)
+        cell.hyperlink = f"#'{sheet}'!A1"
+        cell.style = "Hyperlink"
+
+    index.append([])
+    index.append(["Reporte", data.task_name])
+    index.append(["Report ID", data.report_id])
+    index.append(["Inicio", data.scan_start])
+    index.append(["Fin", data.scan_end])
+    style_sheet(index)
+    add_table(index, "tblIndice", 1, 1, 8, 2)
+    set_widths(index, {"A": 22, "B": 72})
 
 
 def build_workbook(data: ReportData, output_path: Path) -> None:
@@ -416,11 +440,36 @@ def build_workbook(data: ReportData, output_path: Path) -> None:
         ])
         vulns.cell(vulns.max_row, 2).fill = severity_fill(item.severity_level)
     style_sheet(vulns)
-    add_table(vulns, "tblVulnerabilidades", 1, 1, max(vulns.max_row, 2), len(vuln_headers))
+    add_table(vulns, "tblVulnerabilidades", 1, 1, vulns.max_row, len(vuln_headers))
     set_widths(vulns, {
         "A": 11, "B": 13, "C": 16, "D": 24, "E": 18, "F": 46, "G": 8,
         "H": 30, "I": 16, "J": 48, "K": 48, "L": 60, "M": 44, "N": 38,
     })
+
+    by_host: dict[str, list[Finding]] = defaultdict(list)
+    for item in findings:
+        by_host[item.host].append(item)
+
+    per_host = wb.create_sheet("Por_Host")
+    per_host_headers = ["Host", "Hostname", "Severidad", "Nivel", "Puerto", "Vulnerabilidad", "QoD", "CVEs", "Solucion"]
+    per_host.append(per_host_headers)
+    for host, items in sorted(by_host.items()):
+        for item in sorted(items, key=lambda finding: finding.severity, reverse=True):
+            per_host.append([
+                host,
+                item.hostname,
+                item.severity,
+                item.severity_level,
+                item.port,
+                item.vulnerability,
+                item.qod,
+                item.cves,
+                item.solution,
+            ])
+            per_host.cell(per_host.max_row, 4).fill = severity_fill(item.severity_level)
+    style_sheet(per_host)
+    add_table(per_host, "tblPorHost", 1, 1, per_host.max_row, len(per_host_headers))
+    set_widths(per_host, {"A": 18, "B": 28, "C": 11, "D": 13, "E": 18, "F": 52, "G": 8, "H": 30, "I": 80})
 
     hosts = wb.create_sheet("Hosts")
     hosts.append(["Host", "Hostname", "Total", "Critical", "High", "Medium", "Low", "Log", "Severidad máxima"])
@@ -442,8 +491,53 @@ def build_workbook(data: ReportData, output_path: Path) -> None:
             max((item.severity for item in items), default=0),
         ])
     style_sheet(hosts)
-    add_table(hosts, "tblHosts", 1, 1, max(hosts.max_row, 2), 9)
+    add_table(hosts, "tblHosts", 1, 1, hosts.max_row, 9)
     set_widths(hosts, {"A": 18, "B": 28, "C": 10, "D": 10, "E": 10, "F": 10, "G": 10, "H": 10, "I": 18})
+
+    vuln_detail = wb.create_sheet("Vuln_Detalle")
+    detail_headers = [
+        "Vulnerabilidad",
+        "Severidad maxima",
+        "Nivel maximo",
+        "Cantidad",
+        "Hosts afectados",
+        "Puertos",
+        "CVEs",
+        "Resumen",
+        "Impacto",
+        "Solucion",
+        "Referencias",
+    ]
+    vuln_detail.append(detail_headers)
+    by_vuln: dict[str, list[Finding]] = defaultdict(list)
+    for item in findings:
+        by_vuln[item.vulnerability].append(item)
+    for vulnerability, items in sorted(
+        by_vuln.items(),
+        key=lambda pair: (max((finding.severity for finding in pair[1]), default=0), len(pair[1])),
+        reverse=True,
+    ):
+        exemplar = max(items, key=lambda finding: finding.severity)
+        vuln_detail.append([
+            vulnerability,
+            exemplar.severity,
+            exemplar.severity_level,
+            len(items),
+            ", ".join(sorted({item.host for item in items if item.host})),
+            ", ".join(sorted({item.port for item in items if item.port})),
+            ", ".join(sorted({cve.strip() for item in items for cve in item.cves.split(",") if cve.strip()})),
+            exemplar.summary,
+            exemplar.impact,
+            exemplar.solution,
+            exemplar.references,
+        ])
+        vuln_detail.cell(vuln_detail.max_row, 3).fill = severity_fill(exemplar.severity_level)
+    style_sheet(vuln_detail)
+    add_table(vuln_detail, "tblVulnDetalle", 1, 1, vuln_detail.max_row, len(detail_headers))
+    set_widths(vuln_detail, {
+        "A": 56, "B": 16, "C": 14, "D": 10, "E": 45, "F": 28, "G": 30,
+        "H": 60, "I": 60, "J": 70, "K": 45,
+    })
 
     cves = wb.create_sheet("CVEs")
     cves.append(["CVE", "Cantidad", "Hosts afectados", "Severidad máxima", "Vulnerabilidades"])
@@ -460,7 +554,7 @@ def build_workbook(data: ReportData, output_path: Path) -> None:
             "; ".join(sorted({item.vulnerability for item in items if item.vulnerability})[:8]),
         ])
     style_sheet(cves)
-    add_table(cves, "tblCVEs", 1, 1, max(cves.max_row, 2), 5)
+    add_table(cves, "tblCVEs", 1, 1, cves.max_row, 5)
     set_widths(cves, {"A": 18, "B": 10, "C": 45, "D": 18, "E": 80})
 
     remediation = wb.create_sheet("Remediacion")
@@ -468,8 +562,10 @@ def build_workbook(data: ReportData, output_path: Path) -> None:
     for idx, item in enumerate([f for f in findings if f.severity >= 4.0], start=1):
         remediation.append([idx, item.host, item.port, item.vulnerability, item.severity, item.solution])
     style_sheet(remediation)
-    add_table(remediation, "tblRemediacion", 1, 1, max(remediation.max_row, 2), 6)
+    add_table(remediation, "tblRemediacion", 1, 1, remediation.max_row, 6)
     set_widths(remediation, {"A": 10, "B": 18, "C": 18, "D": 52, "E": 12, "F": 80})
+
+    add_index_sheet(wb, data)
 
     for ws in wb.worksheets:
         for row in ws.iter_rows():
@@ -487,6 +583,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     source.add_argument("--xml", type=Path, help="Ruta a un reporte XML exportado desde Greenbone.")
     source.add_argument("--gmp-host", help="IP/FQDN del Greenbone Security Assistant/GMP.")
     parser.add_argument("--gmp-port", type=int, default=9390, help="Puerto GMP TLS. Default: 9390.")
+    parser.add_argument("--connection", choices=["ssh", "tls"], default="ssh", help="Transporte GMP. Default: ssh.")
+    parser.add_argument("--ssh-port", type=int, default=22, help="Puerto SSH para connection=ssh. Default: 22.")
+    parser.add_argument("--ssh-username", help="Usuario SSH opcional. Si se omite, gvm-cli usa su default.")
+    parser.add_argument("--ssh-password", help="Password SSH opcional. Si se omite, gvm-cli usa su default.")
     parser.add_argument("--username", help="Usuario GMP.")
     parser.add_argument("--password", help="Password GMP.")
     parser.add_argument("--report-id", help="UUID del reporte a descargar.")

@@ -92,25 +92,21 @@ def run_gmp_xml(
     username: str,
     password: str,
     xml_request: str,
+    connection: str = "ssh",
+    ssh_username: str = "",
+    ssh_password: str = "",
 ) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [
-            gvm_cli,
-            "--gmp-username",
-            username,
-            "--gmp-password",
-            password,
-            "tls",
-            "--hostname",
-            host,
-            "--port",
-            port,
-            "--xml",
-            xml_request,
-        ],
-        check=False,
-        capture_output=True,
-    )
+    command = [gvm_cli, "--gmp-username", username, "--gmp-password", password]
+    if connection == "ssh":
+        command.extend(["ssh", "--hostname", host, "--port", port, "-A"])
+        if ssh_username:
+            command.extend(["--ssh-username", ssh_username])
+        if ssh_password:
+            command.extend(["--ssh-password", ssh_password])
+    else:
+        command.extend(["tls", "--hostname", host, "--port", port])
+    command.extend(["--xml", xml_request])
+    return subprocess.run(command, check=False, capture_output=True)
 
 
 def clean_text(value: str | None) -> str:
@@ -128,10 +124,13 @@ def list_reports(
     port: str,
     username: str,
     password: str,
+    connection: str,
+    ssh_username: str,
+    ssh_password: str,
     rows: int = 20,
 ) -> list[dict[str, str]]:
     request = f'<get_reports filter="rows={rows} sort-reverse=date" details="0"/>'
-    completed = run_gmp_xml(gvm_cli, host, port, username, password, request)
+    completed = run_gmp_xml(gvm_cli, host, port, username, password, request, connection, ssh_username, ssh_password)
     if completed.returncode != 0:
         stderr = completed.stderr.decode("utf-8", errors="replace").strip()
         stdout = completed.stdout.decode("utf-8", errors="replace").strip()
@@ -177,13 +176,16 @@ def choose_report_id(
     port: str,
     username: str,
     password: str,
+    connection: str,
+    ssh_username: str,
+    ssh_password: str,
 ) -> str:
     print("")
     show_list = ask("Listar reportes disponibles ahora? S/N", "S").lower()
     if show_list not in {"s", "si", "sí", "y", "yes"}:
         return ask("UUID del reporte")
 
-    reports = list_reports(gvm_cli, host, port, username, password)
+    reports = list_reports(gvm_cli, host, port, username, password, connection, ssh_username, ssh_password)
     if not reports:
         return ask("UUID del reporte")
 
@@ -222,7 +224,13 @@ def main() -> int:
     gvm_cli = find_gvm_cli()
     print(f"gvm-cli: {gvm_cli}")
     host = ask("IP o FQDN de Greenbone/OpenVAS")
-    port = ask("Puerto GMP", "9390")
+    connection = ask("Modo de conexion GMP: ssh o tls", "ssh").lower()
+    if connection not in {"ssh", "tls"}:
+        print("Modo no valido. Usa ssh o tls.")
+        return 1
+    default_port = "22" if connection == "ssh" else "9390"
+    port_label = "Puerto SSH" if connection == "ssh" else "Puerto GMP TLS"
+    port = ask(port_label, default_port)
     print("")
     print(f"Probando conectividad TCP a {host}:{port}...")
     tcp_ok, tcp_message = tcp_check(host, port)
@@ -231,16 +239,22 @@ def main() -> int:
     else:
         print(f"No se pudo conectar a {host}:{port}: {tcp_message}")
         print("")
-        print("Esto normalmente significa que GMP no esta expuesto desde tu equipo.")
-        print("La web de Greenbone puede funcionar por 443 aunque GMP/API no este abierto.")
-        print("Valida en el appliance/firewall que el servicio GMP escuche por 9390 o el puerto correcto.")
+        print("Esto normalmente significa que el puerto no esta accesible desde tu equipo.")
+        print("Para GOS actual, usa modo ssh y puerto 22. Para TLS antiguo, usa 9390.")
         continue_anyway = ask("Continuar de todos modos? S/N", "N").lower()
         if continue_anyway not in {"s", "si", "sí", "y", "yes"}:
             return 1
 
     username = ask("Usuario GMP")
     password = ask_password()
-    report_id = choose_report_id(gvm_cli, host, port, username, password)
+    ssh_username = ""
+    ssh_password = ""
+    if connection == "ssh":
+        custom_ssh = ask("Usar usuario/password SSH personalizados? S/N", "N").lower()
+        if custom_ssh in {"s", "si", "sí", "y", "yes"}:
+            ssh_username = ask("Usuario SSH", "gmp")
+            ssh_password = getpass.getpass("Password SSH: ")
+    report_id = choose_report_id(gvm_cli, host, port, username, password, connection, ssh_username, ssh_password)
     min_qod = ask("Min QoD", "70")
     levels = ask("Niveles a exportar, por ejemplo hml o chml", "hml")
     output = normalize_output(ask("Archivo XLSX de salida", "reporte_openvas.xlsx"))
@@ -256,7 +270,11 @@ def main() -> int:
         "--gmp-host",
         host,
         "--gmp-port",
-        port,
+        port if connection == "tls" else "9390",
+        "--connection",
+        connection,
+        "--ssh-port",
+        port if connection == "ssh" else "22",
         "--username",
         username,
         "--password",
@@ -270,6 +288,10 @@ def main() -> int:
         "--output",
         str(output),
     ]
+    if ssh_username:
+        command.extend(["--ssh-username", ssh_username])
+    if ssh_password:
+        command.extend(["--ssh-password", ssh_password])
 
     print("")
     print("Descargando reporte y generando XLSX...")
