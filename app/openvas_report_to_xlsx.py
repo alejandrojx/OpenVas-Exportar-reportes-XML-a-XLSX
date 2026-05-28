@@ -15,6 +15,7 @@ import argparse
 import base64
 import html
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -162,6 +163,19 @@ def get_host_value(result: ET.Element) -> tuple[str, str]:
     return host, hostname
 
 
+def reverse_dns_lookup(host: str, cache: dict[str, str]) -> str:
+    if not host:
+        return ""
+    if host in cache:
+        return cache[host]
+    try:
+        hostname = socket.gethostbyaddr(host)[0].rstrip(".")
+    except (OSError, socket.herror, socket.gaierror):
+        hostname = ""
+    cache[host] = hostname
+    return hostname
+
+
 def refs_from_nvt(nvt: ET.Element | None) -> tuple[str, str]:
     if nvt is None:
         return "", ""
@@ -190,6 +204,7 @@ def parse_report(xml_path: Path) -> ReportData:
     )
 
     seen: set[str] = set()
+    reverse_dns_cache: dict[str, str] = {}
     for result in report.findall("./results/result"):
         result_id = result.get("id", "")
         if result_id and result_id in seen:
@@ -199,6 +214,8 @@ def parse_report(xml_path: Path) -> ReportData:
         nvt = result.find("nvt")
         tags = parse_tags(text_of(nvt, "tags"))
         host, hostname = get_host_value(result)
+        if not hostname:
+            hostname = reverse_dns_lookup(host, reverse_dns_cache)
         threat = text_of(result, "threat")
         severity = parse_float(text_of(result, "severity"))
         cves, references = refs_from_nvt(nvt)
