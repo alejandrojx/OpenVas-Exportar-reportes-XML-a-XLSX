@@ -127,9 +127,11 @@ def main() -> int:
     pdf_path = output_path.with_suffix(".pdf")
 
     prompt_header("Convirtiendo reporte")
-    print(f"XML : {xml_path}")
-    print(f"XLSX: {output_path}")
-    print(f"PDF : {pdf_path}")
+    print("Estamos haciendo el proceso. No cierre esta ventana.")
+    print("")
+    print(f"Entrada: {xml_path}")
+    print(f"Salida XLSX: {output_path}")
+    print(f"Salida PDF : {pdf_path}")
     print("")
     sys.stdout.flush()
 
@@ -143,6 +145,7 @@ def main() -> int:
             str(output_path),
             "--pdf-output",
             str(pdf_path),
+            "--progress",
         ],
         check=False,
     )

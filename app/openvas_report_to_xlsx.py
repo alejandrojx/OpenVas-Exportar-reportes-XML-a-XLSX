@@ -161,7 +161,7 @@ def get_host_value(result: ET.Element) -> tuple[str, str]:
     if host_node is None:
         return "", ""
     host = clean_text(host_node.text)
-    hostname = ""
+    hostname = text_of(host_node, "hostname")
     for detail in host_node.findall("detail"):
         name = text_of(detail, "name").lower()
         value = text_of(detail, "value")
@@ -386,12 +386,30 @@ def pdf_severity_color(level: str):
     }.get(level, colors.HexColor("#BFBFBF"))
 
 
+def severity_label_from_score(score: float) -> str:
+    if score >= 9:
+        return "Critical"
+    if score >= 7:
+        return "High"
+    if score >= 4:
+        return "Medium"
+    if score > 0:
+        return "Low"
+    return "Log"
+
+
+def progress(enabled: bool, percent: int, message: str) -> None:
+    if enabled:
+        print(f"[{percent:3d}%] {message}", flush=True)
+
+
 def para(text: str, style: ParagraphStyle) -> Paragraph:
     escaped = html.escape(str(text or "")).replace("\n", "<br/>")
     return Paragraph(escaped, style)
 
 
-def add_pdf_table(story, rows, widths, header_fill="#1F4E79") -> None:
+def add_pdf_table(story, rows, widths, header_fill="#1F4E79", extra_styles=None) -> None:
+    extra_styles = extra_styles or []
     table = RLTable(rows, colWidths=widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(header_fill)),
@@ -405,7 +423,7 @@ def add_pdf_table(story, rows, widths, header_fill="#1F4E79") -> None:
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    ] + extra_styles))
     story.append(table)
     story.append(Spacer(1, 0.16 * inch))
 
@@ -452,12 +470,15 @@ def build_pdf_report(data: ReportData, output_path: Path) -> None:
         Paragraph("Resumen", h1),
     ]
 
+    max_severity = max((item.severity for item in findings), default=0)
+    max_level = severity_label_from_score(max_severity)
     summary_rows = [
         [para("Metrica", small), para("Valor", small)],
         [para("Total de hallazgos", small), para(str(len(findings)), small)],
         [para("Hosts afectados", small), para(str(len(host_counts)), small)],
         [para("CVEs unicos", small), para(str(len(cve_counts)), small)],
-        [para("Severidad maxima", small), para(str(max((item.severity for item in findings), default=0)), small)],
+        [para("Severidad maxima", small), para(f"{max_severity} ({max_level})", small)],
+        [para("Hostnames resueltos", small), para(str(len({item.host for item in findings if item.host and item.hostname})), small)],
     ]
     add_pdf_table(story, summary_rows, [2.2 * inch, 4.8 * inch])
 
@@ -479,32 +500,95 @@ def build_pdf_report(data: ReportData, output_path: Path) -> None:
     story.append(Spacer(1, 0.16 * inch))
 
     story.append(Paragraph("Hosts con mas hallazgos", h2))
-    host_rows = [[para("Host", small), para("Hostname", small), para("Hallazgos", small), para("Max", small)]]
+    host_rows = [[
+        para("Host", small),
+        para("Hostname", small),
+        para("Hallazgos", small),
+        para("Criticidad maxima", small),
+        para("Score max", small),
+    ]]
     by_host: dict[str, list[Finding]] = defaultdict(list)
     for item in findings:
         by_host[item.host].append(item)
     for host, items in sorted(by_host.items(), key=lambda pair: len(pair[1]), reverse=True)[:10]:
         host_name = next((item.hostname for item in items if item.hostname), "")
+        host_max = max((item.severity for item in items), default=0)
+        host_level = severity_label_from_score(host_max)
         host_rows.append([
             para(host, small),
-            para(host_name, small),
+            para(host_name or "-", small),
             para(str(len(items)), small),
-            para(str(max((item.severity for item in items), default=0)), small),
+            para(host_level, small),
+            para(str(host_max), small),
         ])
-    add_pdf_table(story, host_rows, [1.25 * inch, 2.35 * inch, 0.8 * inch, 0.65 * inch])
+    add_pdf_table(
+        story,
+        host_rows,
+        [1.15 * inch, 2.0 * inch, 0.7 * inch, 1.1 * inch, 0.65 * inch],
+        extra_styles=[
+            ("BACKGROUND", (3, row), (3, row), pdf_severity_color(str(host_rows[row][3].getPlainText())))
+            for row in range(1, len(host_rows))
+        ],
+    )
 
     story.append(PageBreak())
     story.append(Paragraph("Principales vulnerabilidades", h1))
-    vuln_rows = [[para("Sev", small), para("Host", small), para("Puerto", small), para("Vulnerabilidad", small), para("Solucion", small)]]
+    vuln_rows = [[
+        para("Score", small),
+        para("Nivel", small),
+        para("Host", small),
+        para("Hostname", small),
+        para("Puerto", small),
+        para("Vulnerabilidad", small),
+        para("Solucion", small),
+    ]]
     for item in sorted(high_value_findings, key=lambda finding: finding.severity, reverse=True)[:25]:
         vuln_rows.append([
             para(str(item.severity), small),
-            para(item.hostname or item.host, small),
+            para(item.severity_level, small),
+            para(item.host, small),
+            para(item.hostname or "-", small),
             para(item.port, small),
             para(item.vulnerability, small),
             para(item.solution or item.summary, small),
         ])
-    add_pdf_table(story, vuln_rows, [0.45 * inch, 1.35 * inch, 0.75 * inch, 2.25 * inch, 2.25 * inch])
+    add_pdf_table(
+        story,
+        vuln_rows,
+        [0.45 * inch, 0.65 * inch, 0.9 * inch, 1.15 * inch, 0.65 * inch, 1.75 * inch, 1.65 * inch],
+        extra_styles=[
+            ("BACKGROUND", (1, row), (1, row), pdf_severity_color(str(vuln_rows[row][1].getPlainText())))
+            for row in range(1, len(vuln_rows))
+        ],
+    )
+
+    story.append(PageBreak())
+    story.append(Paragraph("Detalle por host", h1))
+    detail_rows = [[para("Host", small), para("Hostname", small), para("Nivel", small), para("Puerto", small), para("Vulnerabilidad", small)]]
+    for item in sorted(findings, key=lambda finding: (finding.host, -finding.severity))[:60]:
+        detail_rows.append([
+            para(item.host, small),
+            para(item.hostname or "-", small),
+            para(item.severity_level, small),
+            para(item.port, small),
+            para(item.vulnerability, small),
+        ])
+    add_pdf_table(
+        story,
+        detail_rows,
+        [1.05 * inch, 1.45 * inch, 0.75 * inch, 0.75 * inch, 3.0 * inch],
+        extra_styles=[
+            ("BACKGROUND", (2, row), (2, row), pdf_severity_color(str(detail_rows[row][2].getPlainText())))
+            for row in range(1, len(detail_rows))
+        ],
+    )
+
+    if cve_counts:
+        story.append(Paragraph("CVEs principales", h1))
+        cve_rows = [[para("CVE", small), para("Cantidad", small)]]
+        for cve, count in cve_counts.most_common(20):
+            cve_rows.append([para(cve, small), para(str(count), small)])
+        add_pdf_table(story, cve_rows, [2.2 * inch, 0.9 * inch])
 
     doc.build(story)
 
@@ -752,6 +836,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gvm-cli", default="gvm-cli", help="Ruta al binario gvm-cli. Default: gvm-cli.")
     parser.add_argument("--output", type=Path, default=Path("openvas_report.xlsx"), help="Archivo XLSX de salida.")
     parser.add_argument("--pdf-output", type=Path, help="Archivo PDF ejecutivo opcional.")
+    parser.add_argument("--progress", action="store_true", help="Muestra avance por etapas en consola.")
     return parser
 
 
@@ -763,6 +848,7 @@ def main(argv: list[str] | None = None) -> int:
         missing = [name for name in ("username", "password", "report_id") if not getattr(args, name)]
         if missing:
             parser.error("--gmp-host requiere: " + ", ".join(f"--{name.replace('_', '-')}" for name in missing))
+        progress(args.progress, 5, "Descargando reporte por GMP.")
         xml_path = download_report_with_gvm_cli(args)
     else:
         xml_path = args.xml
@@ -770,10 +856,17 @@ def main(argv: list[str] | None = None) -> int:
     if not xml_path or not xml_path.exists():
         parser.error(f"No existe el XML: {xml_path}")
 
+    progress(args.progress, 15, "Leyendo XML exportado desde OpenVAS/Greenbone.")
     data = parse_report(xml_path)
+    progress(args.progress, 35, f"XML procesado. Hallazgos encontrados: {len(data.findings)}.")
+    progress(args.progress, 50, "Generando libro XLSX con resumen, hosts, CVEs y remediacion.")
     build_workbook(data, args.output)
+    progress(args.progress, 75, "XLSX generado correctamente.")
     if args.pdf_output:
+        progress(args.progress, 85, "Generando PDF ejecutivo con tablas principales.")
         build_pdf_report(data, args.pdf_output)
+        progress(args.progress, 95, "PDF generado correctamente.")
+    progress(args.progress, 100, "Proceso completado.")
     print(f"OK: {len(data.findings)} hallazgos exportados a {args.output}")
     if args.pdf_output:
         print(f"OK: PDF ejecutivo exportado a {args.pdf_output}")
