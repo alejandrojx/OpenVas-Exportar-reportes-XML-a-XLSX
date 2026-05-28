@@ -30,6 +30,14 @@ from openpyxl.chart import BarChart, Reference
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import Table as RLTable
+from reportlab.platypus import TableStyle
 
 
 XML_REPORT_FORMAT_ID = "a994b278-1f62-11e1-96ac-406186ea4fc5"
@@ -368,6 +376,139 @@ def add_index_sheet(wb: Workbook, data: ReportData) -> None:
     set_widths(index, {"A": 22, "B": 72})
 
 
+def pdf_severity_color(level: str):
+    return {
+        "Critical": colors.HexColor("#C00000"),
+        "High": colors.HexColor("#FF0000"),
+        "Medium": colors.HexColor("#FFC000"),
+        "Low": colors.HexColor("#92D050"),
+        "Log": colors.HexColor("#BFBFBF"),
+    }.get(level, colors.HexColor("#BFBFBF"))
+
+
+def para(text: str, style: ParagraphStyle) -> Paragraph:
+    escaped = html.escape(str(text or "")).replace("\n", "<br/>")
+    return Paragraph(escaped, style)
+
+
+def add_pdf_table(story, rows, widths, header_fill="#1F4E79") -> None:
+    table = RLTable(rows, colWidths=widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(header_fill)),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9E2F3")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3F6FA")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 0.16 * inch))
+
+
+def build_pdf_report(data: ReportData, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    doc = SimpleDocTemplate(
+        str(output_path),
+        pagesize=letter,
+        rightMargin=0.55 * inch,
+        leftMargin=0.55 * inch,
+        topMargin=0.55 * inch,
+        bottomMargin=0.55 * inch,
+        title=f"Reporte OpenVAS - {data.task_name}",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#1F4E79"),
+        alignment=TA_CENTER,
+        spaceAfter=12,
+    )
+    h1 = ParagraphStyle("Heading1Custom", parent=styles["Heading1"], textColor=colors.HexColor("#1F4E79"), spaceAfter=8)
+    h2 = ParagraphStyle("Heading2Custom", parent=styles["Heading2"], textColor=colors.HexColor("#1F4E79"), spaceAfter=6)
+    normal = ParagraphStyle("NormalCustom", parent=styles["BodyText"], fontSize=9, leading=11)
+    small = ParagraphStyle("SmallCustom", parent=styles["BodyText"], fontSize=8, leading=10)
+
+    findings = data.findings
+    severity_counts = Counter(item.severity_level for item in findings)
+    host_counts = Counter(item.host for item in findings if item.host)
+    cve_counts = Counter(cve.strip() for item in findings for cve in item.cves.split(",") if cve.strip())
+    high_value_findings = [item for item in findings if item.severity >= 4.0]
+
+    story = [
+        Paragraph("Reporte Ejecutivo OpenVAS / Greenbone", title_style),
+        Paragraph(f"<b>Tarea:</b> {html.escape(data.task_name or '-')}", normal),
+        Paragraph(f"<b>Report ID:</b> {html.escape(data.report_id or '-')}", normal),
+        Paragraph(f"<b>Periodo:</b> {html.escape(data.scan_start or '-')} a {html.escape(data.scan_end or '-')}", normal),
+        Spacer(1, 0.18 * inch),
+        Paragraph("Resumen", h1),
+    ]
+
+    summary_rows = [
+        [para("Metrica", small), para("Valor", small)],
+        [para("Total de hallazgos", small), para(str(len(findings)), small)],
+        [para("Hosts afectados", small), para(str(len(host_counts)), small)],
+        [para("CVEs unicos", small), para(str(len(cve_counts)), small)],
+        [para("Severidad maxima", small), para(str(max((item.severity for item in findings), default=0)), small)],
+    ]
+    add_pdf_table(story, summary_rows, [2.2 * inch, 4.8 * inch])
+
+    story.append(Paragraph("Hallazgos por severidad", h2))
+    severity_rows = [[para("Severidad", small), para("Cantidad", small)]]
+    for level in ["Critical", "High", "Medium", "Low", "Log"]:
+        severity_rows.append([para(level, small), para(str(severity_counts.get(level, 0)), small)])
+    table = RLTable(severity_rows, colWidths=[2.2 * inch, 1.2 * inch])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9E2F3")),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ] + [
+        ("BACKGROUND", (0, idx), (0, idx), pdf_severity_color(level))
+        for idx, level in enumerate(["Critical", "High", "Medium", "Low", "Log"], start=1)
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 0.16 * inch))
+
+    story.append(Paragraph("Hosts con mas hallazgos", h2))
+    host_rows = [[para("Host", small), para("Hostname", small), para("Hallazgos", small), para("Max", small)]]
+    by_host: dict[str, list[Finding]] = defaultdict(list)
+    for item in findings:
+        by_host[item.host].append(item)
+    for host, items in sorted(by_host.items(), key=lambda pair: len(pair[1]), reverse=True)[:10]:
+        host_name = next((item.hostname for item in items if item.hostname), "")
+        host_rows.append([
+            para(host, small),
+            para(host_name, small),
+            para(str(len(items)), small),
+            para(str(max((item.severity for item in items), default=0)), small),
+        ])
+    add_pdf_table(story, host_rows, [1.25 * inch, 2.35 * inch, 0.8 * inch, 0.65 * inch])
+
+    story.append(PageBreak())
+    story.append(Paragraph("Principales vulnerabilidades", h1))
+    vuln_rows = [[para("Sev", small), para("Host", small), para("Puerto", small), para("Vulnerabilidad", small), para("Solucion", small)]]
+    for item in sorted(high_value_findings, key=lambda finding: finding.severity, reverse=True)[:25]:
+        vuln_rows.append([
+            para(str(item.severity), small),
+            para(item.hostname or item.host, small),
+            para(item.port, small),
+            para(item.vulnerability, small),
+            para(item.solution or item.summary, small),
+        ])
+    add_pdf_table(story, vuln_rows, [0.45 * inch, 1.35 * inch, 0.75 * inch, 2.25 * inch, 2.25 * inch])
+
+    doc.build(story)
+
+
 def build_workbook(data: ReportData, output_path: Path) -> None:
     wb = Workbook()
     summary = wb.active
@@ -610,6 +751,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--filter", help="Filtro de resultados GMP. Default: niveles H/M/L, QoD >= 70, sin paginación.")
     parser.add_argument("--gvm-cli", default="gvm-cli", help="Ruta al binario gvm-cli. Default: gvm-cli.")
     parser.add_argument("--output", type=Path, default=Path("openvas_report.xlsx"), help="Archivo XLSX de salida.")
+    parser.add_argument("--pdf-output", type=Path, help="Archivo PDF ejecutivo opcional.")
     return parser
 
 
@@ -630,7 +772,11 @@ def main(argv: list[str] | None = None) -> int:
 
     data = parse_report(xml_path)
     build_workbook(data, args.output)
+    if args.pdf_output:
+        build_pdf_report(data, args.pdf_output)
     print(f"OK: {len(data.findings)} hallazgos exportados a {args.output}")
+    if args.pdf_output:
+        print(f"OK: PDF ejecutivo exportado a {args.pdf_output}")
     return 0
 
 

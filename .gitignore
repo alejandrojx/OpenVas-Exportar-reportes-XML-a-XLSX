@@ -5,3 +5,4 @@ entradas/
 salidas/
 *.log
 .env
+desktop.ini

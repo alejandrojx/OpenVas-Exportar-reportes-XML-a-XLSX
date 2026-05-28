@@ -105,7 +105,7 @@ def default_output_name(xml_path: Path) -> str:
 
 def main() -> int:
     prompt_header(
-        "Convertidor OpenVAS / Greenbone de XML a XLSX",
+        "Convertidor OpenVAS / Greenbone de XML a XLSX y PDF",
         "Exporte primero el reporte desde Greenbone Web como XML o Anonymous XML.",
     )
 
@@ -124,10 +124,12 @@ def main() -> int:
         output_path = output_path.with_suffix(".xlsx")
     if not output_path.is_absolute():
         output_path = OUTPUT_DIR / output_path.name
+    pdf_path = output_path.with_suffix(".pdf")
 
     prompt_header("Convirtiendo reporte")
     print(f"XML : {xml_path}")
     print(f"XLSX: {output_path}")
+    print(f"PDF : {pdf_path}")
     print("")
     sys.stdout.flush()
 
@@ -139,6 +141,8 @@ def main() -> int:
             str(xml_path),
             "--output",
             str(output_path),
+            "--pdf-output",
+            str(pdf_path),
         ],
         check=False,
     )
@@ -148,7 +152,8 @@ def main() -> int:
         return completed.returncode
 
     prompt_header("Conversion completada")
-    print(f"Salida: {output_path}")
+    print(f"XLSX: {output_path}")
+    print(f"PDF : {pdf_path}")
     return 0
 
 

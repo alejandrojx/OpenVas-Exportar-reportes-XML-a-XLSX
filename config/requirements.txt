@@ -1,2 +1,3 @@
-﻿gvm-tools
+gvm-tools
 openpyxl
+reportlab
